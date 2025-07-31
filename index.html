@@ -1,83 +1,178 @@
-<script>
-  let map;
-  const statusEl = document.getElementById("status");
-
-  function initMap(lat = 37.5665, lng = 126.978) {
-    if (typeof kakao === "undefined" || !kakao.maps) {
-      statusEl.textContent = "카카오 SDK 로드 실패 or 제한됨";
-      console.error("kakao 객체 없음, 도메인 제한/키 확인 필요");
-      return;
-    }
-
-    const container = document.getElementById("map");
-    const options = {
-      center: new kakao.maps.LatLng(lat, lng),
-      level: 4,
-    };
-    map = new kakao.maps.Map(container, options);
-
-    const marker = new kakao.maps.Marker({
-      position: new kakao.maps.LatLng(lat, lng),
-    });
-    marker.setMap(map);
-    statusEl.textContent = `현재 중심: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  }
-
-  function waitForKakaoAndInit() {
-    const maxTries = 20;
-    let tries = 0;
-    const iv = setInterval(() => {
-      if (typeof kakao !== "undefined" && kakao.maps) {
-        clearInterval(iv);
-        initMap();
-      } else if (++tries >= maxTries) {
-        clearInterval(iv);
-        statusEl.textContent = "카카오맵 SDK 로드 실패 (도메인/키 확인)";
-        console.error("카카오맵 SDK를 못 불러옴. 도메인 제한 또는 키 문제.");
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>카카오맵 WebView 연동</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
       }
-    }, 250);
-  }
+      #map {
+        width: 100%;
+        height: 100vh;
+      }
+      .overlay {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: #fff;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
+        z-index: 10;
+      }
+      .error {
+        color: #b00;
+      }
+    </style>
+    <!-- 네가 준 JS 키 -->
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"></script>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="overlay" id="status">로딩 중...</div>
 
-  window.onload = () => {
-    waitForKakaoAndInit();
+    <script>
+      let map;
+      const statusEl = document.getElementById("status");
 
-    window.addEventListener("message", (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "setLocation") {
-          initMap(msg.lat, msg.lng);
-        } else if (msg.type === "searchKeyword") {
-          if (!map) return;
-          const ps = new kakao.maps.services.Places();
-          ps.keywordSearch(msg.keyword, (data, status) => {
-            if (status === kakao.maps.services.Status.OK) {
-              const first = data[0];
-              map.setCenter(new kakao.maps.LatLng(first.y, first.x));
-              new kakao.maps.Marker({
-                position: new kakao.maps.LatLng(first.y, first.x),
-                map: map,
-              });
-              sendToRN({
-                type: "searchResult",
-                name: first.place_name,
-                address: first.address_name,
-              });
-            } else {
-              sendToRN({ type: "searchResult", error: status });
-            }
-          });
+      function setStatus(text, isError = false) {
+        statusEl.textContent = text;
+        if (isError) {
+          statusEl.classList.add("error");
+        } else {
+          statusEl.classList.remove("error");
         }
-      } catch (err) {
-        console.warn("파싱 실패", err);
+        console.log("[KakaoMapStatus]", text);
       }
-    });
-  };
 
-  function sendToRN(payload) {
-    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-      window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-    } else {
-      window.parent.postMessage(JSON.stringify(payload), "*");
-    }
-  }
-</script>
+      function initMap(lat = 37.5665, lng = 126.978) {
+        if (typeof kakao === "undefined" || !kakao.maps) {
+          setStatus(
+            "카카오맵 SDK 로드 실패. 도메인 제한 또는 키 확인 필요.",
+            true
+          );
+          console.error("카카오 객체 없음. 도메인/키 설정을 확인해라.");
+          return;
+        }
+
+        const container = document.getElementById("map");
+        const options = {
+          center: new kakao.maps.LatLng(lat, lng),
+          level: 4,
+        };
+        map = new kakao.maps.Map(container, options);
+
+        // 기본 마커
+        const marker = new kakao.maps.Marker({
+          position: new kakao.maps.LatLng(lat, lng),
+        });
+        marker.setMap(map);
+        setStatus(`현재 중심: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      }
+
+      // 여러 위치를 한 화면에 맞추는 유틸 (사용 예: 여러 좌표 받았을 때)
+      function fitBounds(positions) {
+        if (!map || !positions?.length) return;
+        const bounds = new kakao.maps.LatLngBounds();
+        positions.forEach((pos) =>
+          bounds.extend(new kakao.maps.LatLng(pos.lat, pos.lng))
+        );
+        map.setBounds(bounds);
+      }
+
+      function waitForKakaoAndInit() {
+        const maxTries = 20;
+        let tries = 0;
+        const iv = setInterval(() => {
+          if (typeof kakao !== "undefined" && kakao.maps) {
+            clearInterval(iv);
+            initMap();
+          } else if (++tries >= maxTries) {
+            clearInterval(iv);
+            setStatus(
+              "카카오맵 SDK를 못 불러왔습니다. Web 플랫폼 도메인 / 키 확인하세요.",
+              true
+            );
+          }
+        }, 250);
+      }
+
+      window.onload = () => {
+        waitForKakaoAndInit();
+
+        window.addEventListener("message", (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === "setLocation") {
+              initMap(msg.lat, msg.lng);
+            } else if (msg.type === "searchKeyword") {
+              if (!map) {
+                setStatus("지도 준비 안 됨: 검색 처리 불가", true);
+                return;
+              }
+              const ps = new kakao.maps.services.Places();
+              ps.keywordSearch(msg.keyword, (data, status) => {
+                if (status === kakao.maps.services.Status.OK) {
+                  const first = data[0];
+                  map.setCenter(new kakao.maps.LatLng(first.y, first.x));
+                  new kakao.maps.Marker({
+                    position: new kakao.maps.LatLng(first.y, first.x),
+                    map: map,
+                  });
+                  sendToRN({
+                    type: "searchResult",
+                    name: first.place_name,
+                    address: first.address_name,
+                    location: { lat: first.y, lng: first.x },
+                  });
+                  setStatus(
+                    `검색: ${first.place_name} (${first.address_name})`
+                  );
+                } else {
+                  sendToRN({ type: "searchResult", error: status });
+                  setStatus(`검색 실패: ${status}`, true);
+                }
+              });
+            }
+          } catch (err) {
+            console.warn("파싱 실패", err);
+          }
+        });
+      };
+
+      function sendToRN(payload) {
+        if (
+          window.ReactNativeWebView &&
+          window.ReactNativeWebView.postMessage
+        ) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        } else {
+          window.parent.postMessage(JSON.stringify(payload), "*");
+        }
+      }
+
+      // 디버그용: RN이 없을 때도 테스트 가능하게 키워드 검색 버튼 (optional)
+      // 예시: URL 파라미터로 ?q=강남역 처럼 넣으면 자동 검색
+      function getQueryParam(key) {
+        const params = new URLSearchParams(window.location.search);
+        return params.get(key);
+      }
+      window.addEventListener("load", () => {
+        const q = getQueryParam("q");
+        if (q) {
+          // 메시지 형식 흉내
+          const event = {
+            data: JSON.stringify({ type: "searchKeyword", keyword: q }),
+          };
+          window.dispatchEvent(new MessageEvent("message", event));
+        }
+      });
+    </script>
+  </body>
+</html>
