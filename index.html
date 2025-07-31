@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>카카오맵 WebView 연동</title>
+    <title>카카오맵 WebView 연동 - 디버그 개선</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
       html,
@@ -20,28 +20,48 @@
         top: 10px;
         left: 10px;
         background: #fff;
-        padding: 6px 10px;
+        padding: 10px 15px;
         border-radius: 4px;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
         box-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
         z-index: 10;
+        max-width: 400px;
+        font-size: 12px;
+        line-height: 1.4;
       }
       .error {
         color: #b00;
+        background: #ffebee;
+        border: 1px solid #ffcdd2;
+      }
+      .debug-info {
+        position: absolute;
+        top: 80px;
+        left: 10px;
+        background: #f5f5f5;
+        padding: 10px;
+        font-size: 11px;
+        border-radius: 4px;
+        max-width: 400px;
+        font-family: monospace;
+        white-space: pre-wrap;
       }
     </style>
-    <!-- 카카오맵 JS 키 -->
-    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"></script>
   </head>
   <body>
     <div id="map"></div>
     <div class="overlay" id="status">로딩 중...</div>
+    <div class="debug-info" id="debug"></div>
 
     <script>
       let map;
 
       function getStatusEl() {
         return document.getElementById("status");
+      }
+
+      function getDebugEl() {
+        return document.getElementById("debug");
       }
 
       function setStatus(text, isError = false) {
@@ -52,6 +72,13 @@
           else el.classList.remove("error");
         }
         console.log("[KakaoMapStatus]", text);
+      }
+
+      function setDebugInfo(info) {
+        const el = getDebugEl();
+        if (el) {
+          el.textContent = info;
+        }
       }
 
       function initMap(lat = 37.5665, lng = 126.978) {
@@ -75,24 +102,51 @@
           position: new kakao.maps.LatLng(lat, lng),
         });
         marker.setMap(map);
-        setStatus(`현재 중심: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        setStatus(`지도 로드 성공! 중심: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
       }
 
       function waitForKakaoAndInit() {
-        const maxTries = 20;
+        const maxTries = 30;
         let tries = 0;
+
+        // 디버그 정보 수집
+        const debugInfo = `
+현재 URL: ${window.location.href}
+현재 도메인: ${window.location.hostname}
+프로토콜: ${window.location.protocol}
+카카오 SDK URL: https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a
+        `;
+        setDebugInfo(debugInfo);
+
         const iv = setInterval(() => {
           if (typeof kakao !== "undefined" && kakao.maps) {
             clearInterval(iv);
+            setStatus("카카오맵 SDK 로드 완료!");
             initMap();
           } else if (++tries >= maxTries) {
             clearInterval(iv);
             setStatus(
-              "카카오맵 SDK를 못 불러왔습니다. Web 플랫폼 도메인 / 키 확인하세요.",
+              `카카오맵 SDK 로드 실패 (${tries}회 시도). 웹 플랫폼 도메인: ${window.location.hostname} 등록 확인 필요.`,
               true
             );
+
+            // 네트워크 오류 확인
+            fetch(
+              "https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a"
+            )
+              .then((response) => {
+                setDebugInfo(
+                  debugInfo +
+                    `\nSDK 응답 상태: ${response.status} ${response.statusText}`
+                );
+              })
+              .catch((error) => {
+                setDebugInfo(debugInfo + `\nSDK 로드 오류: ${error.message}`);
+              });
+          } else {
+            setStatus(`카카오맵 SDK 로딩 중... (${tries}/${maxTries})`);
           }
-        }, 250);
+        }, 200);
       }
 
       function sendToRN(payload) {
@@ -131,7 +185,9 @@
                   address: first.address_name,
                   location: { lat: first.y, lng: first.x },
                 });
-                setStatus(`검색: ${first.place_name} (${first.address_name})`);
+                setStatus(
+                  `검색 완료: ${first.place_name} (${first.address_name})`
+                );
               } else {
                 sendToRN({ type: "searchResult", error: status });
                 setStatus(`검색 실패: ${status}`, true);
@@ -139,7 +195,8 @@
             });
           }
         } catch (err) {
-          console.warn("파싱 실패", err);
+          console.warn("메시지 파싱 실패", err);
+          setStatus(`메시지 처리 오류: ${err.message}`, true);
         }
       }
 
@@ -148,19 +205,41 @@
         return params.get(key);
       }
 
+      // SDK 로드 에러 이벤트 리스너
+      window.addEventListener("error", function (e) {
+        if (e.filename && e.filename.includes("dapi.kakao.com")) {
+          setStatus(
+            "카카오맵 SDK 스크립트 로드 실패. 네트워크 또는 도메인 권한 확인 필요.",
+            true
+          );
+          setDebugInfo(
+            getDebugEl().textContent + `\n스크립트 오류: ${e.message}`
+          );
+        }
+      });
+
       window.addEventListener("load", () => {
+        setStatus("페이지 로드 완료. 카카오맵 SDK 확인 중...");
         waitForKakaoAndInit();
         window.addEventListener("message", handleMessageEvent);
 
         // 디버그: ?q=강남역 처럼 붙이면 자동 검색 시도
         const q = getQueryParam("q");
         if (q) {
-          const fakeEvent = {
-            data: JSON.stringify({ type: "searchKeyword", keyword: q }),
-          };
-          handleMessageEvent(fakeEvent);
+          setTimeout(() => {
+            const fakeEvent = {
+              data: JSON.stringify({ type: "searchKeyword", keyword: q }),
+            };
+            handleMessageEvent(fakeEvent);
+          }, 2000);
         }
       });
     </script>
+
+    <!-- 카카오맵 JS 키 -->
+    <script
+      src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"
+      onerror="console.error('카카오맵 SDK 로드 실패'); document.getElementById('status').textContent = '카카오맵 SDK 로드 실패 - 도메인 권한 확인 필요'; document.getElementById('status').classList.add('error');"
+    ></script>
   </body>
 </html>
