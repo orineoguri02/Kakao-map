@@ -5,68 +5,204 @@
     <title>카카오맵 WebView 연동</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
       #map {
         width: 100%;
         height: 100vh;
+      }
+      .overlay {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: #fff;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-family: system-ui, sans-serif;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        z-index: 10;
+        font-size: 12px;
+        max-width: 300px;
+      }
+      .error {
+        color: #d32f2f;
+        background: #ffebee;
+        border: 1px solid #ffcdd2;
       }
     </style>
   </head>
   <body>
     <div id="map"></div>
+    <div class="overlay" id="status">로딩 중...</div>
+
     <script>
       let map;
       let volunteerMarkers = [];
       let selectedMarker = null;
 
-      function initMap() {
-        map = new kakao.maps.Map(document.getElementById("map"), {
-          center: new kakao.maps.LatLng(35.1796, 129.0756),
-          level: 8,
-        });
-        // RN 쪽에 로드 완료 알림
-        window.ReactNativeWebView?.postMessage(
-          JSON.stringify({ type: "map_loaded" })
-        );
+      function setStatus(text, isError = false) {
+        const el = document.getElementById("status");
+        el.textContent = text;
+        el.classList.toggle("error", isError);
+        console.log("[상태]", text);
       }
 
+      function initMap(lat = 35.1796, lng = 129.0756, zoom = 8) {
+        try {
+          if (typeof kakao === "undefined" || !kakao.maps) {
+            throw new Error("카카오맵 SDK가 로드되지 않음");
+          }
+
+          console.log("지도 초기화 시작");
+
+          const container = document.getElementById("map");
+          map = new kakao.maps.Map(container, {
+            center: new kakao.maps.LatLng(lat, lng),
+            level: zoom,
+          });
+
+          setStatus("지도 로드 완료");
+
+          // React Native에 로드 완료 알림
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(
+              JSON.stringify({ type: "map_loaded" })
+            );
+          }
+
+          console.log("지도 초기화 완료");
+        } catch (error) {
+          console.error("지도 초기화 실패:", error);
+          setStatus(`지도 로드 실패: ${error.message}`, true);
+
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(
+              JSON.stringify({
+                type: "map_error",
+                error: error.message,
+              })
+            );
+          }
+        }
+      }
+
+      // 마커 제거 함수
       function clearMarkers(arr) {
         arr.forEach((m) => m.setMap(null));
         arr.length = 0;
       }
 
+      // React Native에서 오는 메시지 처리
       function handleMessage(e) {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "setVolunteerLocations") {
-          clearMarkers(volunteerMarkers);
-          msg.locations.forEach((loc) => {
-            const marker = new kakao.maps.Marker({
-              position: new kakao.maps.LatLng(loc.lat, loc.lng),
+        try {
+          const msg = JSON.parse(e.data);
+
+          // 지도가 준비되지 않았으면 무시
+          if (!map) {
+            console.warn("지도가 아직 준비되지 않음");
+            return;
+          }
+
+          if (msg.type === "setVolunteerLocations") {
+            console.log(`${msg.locations.length}개 봉사 위치 마커 설정`);
+
+            // 기존 봉사 마커 제거
+            clearMarkers(volunteerMarkers);
+
+            // 새 마커 생성
+            msg.locations.forEach((loc) => {
+              const position = new kakao.maps.LatLng(loc.lat, loc.lng);
+              const marker = new kakao.maps.Marker({
+                position: position,
+                map: map,
+                title: loc.name,
+              });
+
+              // 마커 클릭 이벤트
+              kakao.maps.event.addListener(marker, "click", function () {
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(
+                    JSON.stringify({
+                      type: "location_selected",
+                      location: loc,
+                    })
+                  );
+                }
+              });
+
+              volunteerMarkers.push(marker);
+            });
+
+            setStatus(`${msg.locations.length}개 위치 표시됨`);
+          }
+
+          if (msg.type === "setLocation") {
+            console.log(`지도 이동: ${msg.lat}, ${msg.lng}`);
+
+            // 기존 선택 마커 제거
+            if (selectedMarker) {
+              selectedMarker.setMap(null);
+            }
+
+            // 새 선택 마커 생성
+            const position = new kakao.maps.LatLng(msg.lat, msg.lng);
+            selectedMarker = new kakao.maps.Marker({
+              position: position,
               map: map,
             });
-            volunteerMarkers.push(marker);
-          });
-        }
-        if (msg.type === "setLocation") {
-          // 기존 선택 마커 제거
-          if (selectedMarker) selectedMarker.setMap(null);
-          selectedMarker = new kakao.maps.Marker({
-            position: new kakao.maps.LatLng(msg.lat, msg.lng),
-            map: map,
-          });
-          map.setCenter(new kakao.maps.LatLng(msg.lat, msg.lng));
-          if (msg.zoom != null) map.setLevel(msg.zoom);
+
+            // 지도 중심 이동
+            map.setCenter(position);
+            if (msg.zoom != null) {
+              map.setLevel(msg.zoom);
+            }
+
+            setStatus(`선택 위치로 이동됨`);
+          }
+        } catch (error) {
+          console.error("메시지 처리 실패:", error);
+          setStatus(`메시지 처리 오류: ${error.message}`, true);
         }
       }
 
       window.addEventListener("message", handleMessage);
 
-      window.onload = () => {
-        const script = document.createElement("script");
-        script.src =
-          "https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a";
-        script.onload = initMap;
-        document.head.appendChild(script);
-      };
+      // 페이지 로드 완료 후 카카오맵 SDK 확인 및 초기화
+      window.addEventListener("load", function () {
+        setStatus("페이지 로드 완료. SDK 확인 중...");
+
+        // 카카오맵 SDK가 로드될 때까지 대기
+        const checkInterval = setInterval(() => {
+          if (typeof kakao !== "undefined" && kakao.maps && kakao.maps.LatLng) {
+            clearInterval(checkInterval);
+            setStatus("카카오맵 SDK 확인됨. 지도 초기화 중...");
+
+            // 약간의 지연 후 초기화 (안전을 위해)
+            setTimeout(() => {
+              initMap();
+            }, 100);
+          }
+        }, 100);
+
+        // 10초 후 타임아웃
+        setTimeout(() => {
+          if (!map) {
+            clearInterval(checkInterval);
+            setStatus("카카오맵 SDK 로드 타임아웃", true);
+            console.error("카카오맵 SDK 로드 타임아웃");
+          }
+        }, 10000);
+      });
     </script>
+
+    <!-- 카카오맵 JS SDK 로드 -->
+    <script
+      src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"
+      onerror="setStatus('SDK 스크립트 로드 실패', true);"
+    ></script>
   </body>
 </html>
