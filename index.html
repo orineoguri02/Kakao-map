@@ -38,7 +38,6 @@
         };
         map = new kakao.maps.Map(container, options);
 
-        // React Native에 로드 완료 알림
         sendToRN({ type: "map_loaded" });
       }
 
