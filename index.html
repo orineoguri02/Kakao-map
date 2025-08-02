@@ -15,81 +15,18 @@
         width: 100%;
         height: 100vh;
       }
-      .overlay {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        background: #fff;
-        padding: 10px 15px;
-        border-radius: 4px;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-        box-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
-        z-index: 10;
-        max-width: 400px;
-        font-size: 12px;
-        line-height: 1.4;
-      }
-      .error {
-        color: #b00;
-        background: #ffebee;
-        border: 1px solid #ffcdd2;
-      }
-      .debug-info {
-        position: absolute;
-        top: 80px;
-        left: 10px;
-        background: #f5f5f5;
-        padding: 10px;
-        font-size: 11px;
-        border-radius: 4px;
-        max-width: 400px;
-        font-family: monospace;
-        white-space: pre-wrap;
-      }
     </style>
   </head>
   <body>
     <div id="map"></div>
-    <div class="overlay" id="status">로딩 중...</div>
-    <div class="debug-info" id="debug"></div>
 
     <script>
       let map;
       let volunteerMarkers = [];
       let selectedMarker = null;
 
-      function getStatusEl() {
-        return document.getElementById("status");
-      }
-
-      function getDebugEl() {
-        return document.getElementById("debug");
-      }
-
-      function setStatus(text, isError = false) {
-        const el = getStatusEl();
-        if (el) {
-          el.textContent = text;
-          if (isError) el.classList.add("error");
-          else el.classList.remove("error");
-        }
-        console.log("[KakaoMapStatus]", text);
-      }
-
-      function setDebugInfo(info) {
-        const el = getDebugEl();
-        if (el) {
-          el.textContent = info;
-        }
-      }
-
-      // 원래 initMap 함수에 봉사자 마커 기능 추가
       function initMap(lat = 35.1796, lng = 129.0756, zoom = 8) {
         if (typeof kakao === "undefined" || !kakao.maps) {
-          setStatus(
-            "카카오맵 SDK 로드 실패. 도메인 제한 또는 키 확인 필요.",
-            true
-          );
           console.error("카카오 객체 없음. 도메인/키 설정을 확인해라.");
           return;
         }
@@ -101,13 +38,10 @@
         };
         map = new kakao.maps.Map(container, options);
 
-        setStatus(`지도 로드 성공! 중심: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-
         // React Native에 로드 완료 알림
         sendToRN({ type: "map_loaded" });
       }
 
-      // 마커 제거 함수
       function clearMarkers(arr) {
         arr.forEach((m) => m.setMap(null));
         arr.length = 0;
@@ -117,42 +51,13 @@
         const maxTries = 30;
         let tries = 0;
 
-        // 디버그 정보 수집
-        const debugInfo = `
-현재 URL: ${window.location.href}
-현재 도메인: ${window.location.hostname}
-프로토콜: ${window.location.protocol}
-카카오 SDK URL: https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a
-        `;
-        setDebugInfo(debugInfo);
-
         const iv = setInterval(() => {
           if (typeof kakao !== "undefined" && kakao.maps) {
             clearInterval(iv);
-            setStatus("카카오맵 SDK 로드 완료!");
             initMap();
           } else if (++tries >= maxTries) {
             clearInterval(iv);
-            setStatus(
-              `카카오맵 SDK 로드 실패 (${tries}회 시도). 웹 플랫폼 도메인: ${window.location.hostname} 등록 확인 필요.`,
-              true
-            );
-
-            // 네트워크 오류 확인
-            fetch(
-              "https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a"
-            )
-              .then((response) => {
-                setDebugInfo(
-                  debugInfo +
-                    `\nSDK 응답 상태: ${response.status} ${response.statusText}`
-                );
-              })
-              .catch((error) => {
-                setDebugInfo(debugInfo + `\nSDK 로드 오류: ${error.message}`);
-              });
-          } else {
-            setStatus(`카카오맵 SDK 로딩 중... (${tries}/${maxTries})`);
+            console.error("카카오맵 SDK 로드 실패");
           }
         }, 200);
       }
@@ -168,20 +73,16 @@
         }
       }
 
-      // React Native 메시지 처리 함수 (원래 기능 추가)
       function handleMessageEvent(e) {
         try {
           const msg = JSON.parse(e.data);
 
-          // 지도가 준비되지 않았으면 무시
           if (!map) {
             console.warn("지도가 아직 준비되지 않음");
             return;
           }
 
           if (msg.type === "setVolunteerLocations") {
-            console.log(`${msg.locations.length}개 봉사 위치 마커 설정`);
-
             // 기존 봉사 마커 제거
             clearMarkers(volunteerMarkers);
 
@@ -204,13 +105,9 @@
 
               volunteerMarkers.push(marker);
             });
-
-            setStatus(`${msg.locations.length}개 봉사 위치 표시됨`);
           }
 
           if (msg.type === "setLocation") {
-            console.log(`지도 이동: ${msg.lat}, ${msg.lng}`);
-
             // 기존 선택 마커 제거
             if (selectedMarker) {
               selectedMarker.setMap(null);
@@ -228,15 +125,9 @@
             if (msg.zoom != null) {
               map.setLevel(msg.zoom);
             }
-
-            setStatus(`선택 위치로 이동됨`);
           }
 
           if (msg.type === "searchKeyword") {
-            if (!map) {
-              setStatus("지도 준비 안 됨: 검색 처리 불가", true);
-              return;
-            }
             const ps = new kakao.maps.services.Places();
             ps.keywordSearch(msg.keyword, (data, status) => {
               if (status === kakao.maps.services.Status.OK) {
@@ -252,67 +143,23 @@
                   address: first.address_name,
                   location: { lat: first.y, lng: first.x },
                 });
-                setStatus(
-                  `검색 완료: ${first.place_name} (${first.address_name})`
-                );
               } else {
                 sendToRN({ type: "searchResult", error: status });
-                setStatus(`검색 실패: ${status}`, true);
               }
             });
           }
         } catch (err) {
           console.warn("메시지 파싱 실패", err);
-          setStatus(`메시지 처리 오류: ${err.message}`, true);
         }
       }
-
-      function getQueryParam(key) {
-        const params = new URLSearchParams(window.location.search);
-        return params.get(key);
-      }
-
-      // SDK 로드 에러 이벤트 리스너
-      window.addEventListener("error", function (e) {
-        if (e.filename && e.filename.includes("dapi.kakao.com")) {
-          setStatus(
-            "카카오맵 SDK 스크립트 로드 실패. 네트워크 또는 도메인 권한 확인 필요.",
-            true
-          );
-          setDebugInfo(
-            getDebugEl().textContent + `\n스크립트 오류: ${e.message}`
-          );
-
-          // React Native에 에러 알림
-          sendToRN({
-            type: "map_error",
-            error: "SDK 스크립트 로드 실패",
-          });
-        }
-      });
 
       window.addEventListener("load", () => {
-        setStatus("페이지 로드 완료. 카카오맵 SDK 확인 중...");
         waitForKakaoAndInit();
         window.addEventListener("message", handleMessageEvent);
-
-        // 디버그: ?q=강남역 처럼 붙이면 자동 검색 시도
-        const q = getQueryParam("q");
-        if (q) {
-          setTimeout(() => {
-            const fakeEvent = {
-              data: JSON.stringify({ type: "searchKeyword", keyword: q }),
-            };
-            handleMessageEvent(fakeEvent);
-          }, 2000);
-        }
       });
     </script>
 
     <!-- 카카오맵 JS 키 -->
-    <script
-      src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"
-      onerror="console.error('카카오맵 SDK 로드 실패'); document.getElementById('status').textContent = '카카오맵 SDK 로드 실패 - 도메인 권한 확인 필요'; document.getElementById('status').classList.add('error');"
-    ></script>
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"></script>
   </body>
 </html>
