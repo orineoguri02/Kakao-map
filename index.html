@@ -23,9 +23,10 @@
     <script>
       let map;
       let volunteerMarkers = [];
-      let selectedMarker = null;
 
-      function initMap(lat = 35.1796, lng = 129.0756, zoom = 8) {
+      // 전국 중앙(대충)과 넓은 줌 레벨로 초기화
+      // level 값이 클수록 더 멀리(넓게) 보입니다.
+      function initMap(lat = 36.5, lng = 127.9, zoom = 12) {
         if (typeof kakao === "undefined" || !kakao.maps) {
           console.error("카카오 객체 없음. 도메인/키 설정을 확인해라.");
           return;
@@ -85,8 +86,8 @@
             // 기존 봉사 마커 제거
             clearMarkers(volunteerMarkers);
 
-            // 새 마커 생성
-            msg.locations.forEach((loc) => {
+            // 새 마커 생성 (봉사 포인트는 필요 시에만 RN에서 보냄)
+            (msg.locations || []).forEach((loc) => {
               const position = new kakao.maps.LatLng(loc.lat, loc.lng);
               const marker = new kakao.maps.Marker({
                 position: position,
@@ -94,7 +95,6 @@
                 title: loc.name,
               });
 
-              // 마커 클릭 이벤트
               kakao.maps.event.addListener(marker, "click", function () {
                 sendToRN({
                   type: "location_selected",
@@ -106,20 +106,24 @@
             });
           }
 
+          if (msg.type === "setDistrictOffices") {
+            // 구청 포커싱만 원하므로, 마커는 생성하지 않고 무시
+            // 필요하면 여기서 좌표 목록을 저장해두고 setLocation으로만 이동 처리 가능
+            return;
+          }
+
           if (msg.type === "setLocation") {
-            // 기존 선택 마커 제거
-            if (selectedMarker) {
-              selectedMarker.setMap(null);
-            }
-
-            // 새 선택 마커 생성
+            // 포커싱만 하고 마커는 생성하지 않음
             const position = new kakao.maps.LatLng(msg.lat, msg.lng);
-            selectedMarker = new kakao.maps.Marker({
-              position: position,
-              map: map,
-            });
+            map.setCenter(position);
+            if (msg.zoom != null) {
+              map.setLevel(msg.zoom);
+            }
+          }
 
-            // 지도 중심 이동
+          if (msg.type === "setCurrentLocation") {
+            // 현재 위치로 포커싱만
+            const position = new kakao.maps.LatLng(msg.lat, msg.lng);
             map.setCenter(position);
             if (msg.zoom != null) {
               map.setLevel(msg.zoom);
@@ -131,16 +135,17 @@
             ps.keywordSearch(msg.keyword, (data, status) => {
               if (status === kakao.maps.services.Status.OK) {
                 const first = data[0];
-                map.setCenter(new kakao.maps.LatLng(first.y, first.x));
-                new kakao.maps.Marker({
-                  position: new kakao.maps.LatLng(first.y, first.x),
-                  map: map,
-                });
+                const lat = Number(first.y);
+                const lng = Number(first.x);
+                map.setCenter(new kakao.maps.LatLng(lat, lng));
+                // 검색 시에도 마커를 찍지 않으려면 아래 코드를 제거 유지
+                // new kakao.maps.Marker({ position: new kakao.maps.LatLng(lat, lng), map: map });
+
                 sendToRN({
                   type: "searchResult",
                   name: first.place_name,
                   address: first.address_name,
-                  location: { lat: first.y, lng: first.x },
+                  location: { lat, lng },
                 });
               } else {
                 sendToRN({ type: "searchResult", error: status });
