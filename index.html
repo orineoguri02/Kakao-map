@@ -84,7 +84,7 @@
       }
 
       function addCourseMarker(lat, lng) {
-        const pos = new kakao.maps.LatLng(lat, lng);
+        const pos = new kakao.maps.LatLng(Number(lat), Number(lng));
         const marker = new kakao.maps.Marker({ position: pos, map });
         courseMarkers.push(marker);
         return pos;
