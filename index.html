@@ -254,7 +254,29 @@
       });
     </script>
 
-    <!-- 카카오맵 JS 키 -->
-    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=14c064ab4043e357b8a6246384ef402a&libraries=services,clusterer"></script>
+    <!-- 실제 키는 config.js에 정의합니다 (config.example.js 참고) -->
+    <script src="./config.js"></script>
+    <script>
+      (function loadKakaoSdk() {
+        var appKey = (window && window.KAKAO_MAP_API_KEY) || "";
+        if (!appKey) {
+          console.error("KAKAO_MAP_API_KEY 누락: config.js에서 키를 설정하세요.");
+          return;
+        }
+        var s = document.createElement("script");
+        s.src = "https://dapi.kakao.com/v2/maps/sdk.js?autoload=false&libraries=services,clusterer&appkey=" + encodeURIComponent(appKey);
+        s.onload = function () {
+          if (window.kakao && kakao.maps && kakao.maps.load) {
+            kakao.maps.load(function () {
+              // kakao 객체 준비 후 init 대기 루틴이 실행되도록 그대로 둡니다
+            });
+          }
+        };
+        s.onerror = function () {
+          console.error("카카오 SDK 로드 실패: 도메인/네트워크/키를 확인하세요.");
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
   </body>
 </html>
